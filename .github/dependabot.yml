@@ -1,0 +1,165 @@
+# Dependabot configuration for JuliaOS
+#
+# This file configures automated dependency updates across multiple package ecosystems
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # JavaScript/TypeScript dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "javascript"
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*eslint*"
+          - "*prettier*"
+          - "*jest*"
+          - "*babel*"
+        update-types:
+          - "minor"
+          - "patch"
+      production-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "*eslint*"
+          - "*prettier*"
+          - "*jest*"
+          - "*babel*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Ignore major updates that might break compatibility
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # Individual package.json files in the monorepo
+  - package-ecosystem: "npm"
+    directory: "/packages/agent-manager"
+    schedule:
+      interval: "weekly"
+    groups:
+      all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  
+  - package-ecosystem: "npm"
+    directory: "/packages/agents"
+    schedule:
+      interval: "weekly"
+    groups:
+      all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  
+  - package-ecosystem: "npm"
+    directory: "/packages/bridges"
+    schedule:
+      interval: "weekly"
+    groups:
+      all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  
+  - package-ecosystem: "npm"
+    directory: "/packages/cli"
+    schedule:
+      interval: "weekly"
+    groups:
+      all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+          
+  - package-ecosystem: "npm"
+    directory: "/packages/core"
+    schedule:
+      interval: "weekly"
+    groups:
+      all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Julia dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/packages/python-wrapper"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      development:
+        patterns:
+          - "pytest*"
+          - "black"
+          - "flake8"
+          - "mypy"
+          - "isort"
+        update-types:
+          - "minor"
+          - "patch"
+      runtime:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pytest*"
+          - "black"
+          - "flake8"
+          - "mypy"
+          - "isort"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
