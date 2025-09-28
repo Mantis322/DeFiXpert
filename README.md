@@ -16,7 +16,32 @@ Welcome to the next-generation DeFi platform for:
 - **AI-powered strategy management and simulation**
 - **Premium analytics and performance tracking**
 
+
 All modules are cross-chain compatible and designed for high-frequency data streaming. The backend leverages JuliaOS for robust, scalable, and modular agent-based architecture.
+
+---
+
+## 🧠 Intelligence Diagram
+
+```mermaid
+mindmap
+	root((DeFiXpert Intelligence))
+		Live Price Feed
+			Mainnet
+			DEX
+			Oracle
+		Arbitrage Engine
+			Opportunity Detection
+			Cross-chain
+		AI Strategy
+			Simulation
+			Auto-Stake
+			Performance Tracking
+		Premium Analytics
+			P&L
+			Risk Analysis
+			Notifications
+```
 
 ---
 
@@ -66,15 +91,25 @@ This project requires a running **PostgreSQL** database for storing live price f
 
 ```shell
 psql -U postgres
-CREATE DATABASE juliaos_db;
-CREATE USER juliaos_user WITH PASSWORD 'yourpassword';
-GRANT ALL PRIVILEGES ON DATABASE juliaos_db TO juliaos_user;
 ```
 
 #### Configure Connection
 
-- Update your backend configuration (e.g. `backend/Manifest.toml` or `.env`) with:
 	- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+
+#### Create Database & User
+
+```shell
+psql -U postgres
+CREATE DATABASE algofi_db;
+CREATE USER postgres WITH PASSWORD 'postgres';
+GRANT ALL PRIVILEGES ON DATABASE algofi_db TO postgres;
+```
+
+#### Configure Connection
+
+- Update your backend configuration (e.g. `backend/.env` or `backend/Manifest.toml`) with:
+  - `DB_HOST`, `DB_PORT`, `DB_NAME=algofi_db`, `DB_USER`, `DB_PASSWORD`
 
 ---
 
