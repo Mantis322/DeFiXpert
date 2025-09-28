@@ -24,7 +24,6 @@ import {
 import {
   Dashboard as DashboardIcon,
   GroupWork as SwarmIcon,
-  TrendingUp as MarketIcon,
   AccountTree as StrategyIcon,
   Analytics as PerformanceIcon,
   Settings as SettingsIcon,
@@ -42,7 +41,6 @@ const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
   { text: 'Swarm Control', icon: <SwarmIcon />, path: '/swarm' },
   { text: 'Stake & Invest', icon: <StrategyIcon />, path: '/stake' },
-  { text: 'Market Analysis', icon: <MarketIcon />, path: '/market' },
   { text: 'Strategies', icon: <StrategyIcon />, path: '/strategies' },
   { text: 'Performance', icon: <PerformanceIcon />, path: '/performance' },
 ];
@@ -50,39 +48,11 @@ const menuItems = [
 function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, walletAddress, accountInfo, disconnectWallet, refreshAccountInfo } = useAuth();
+  const { user, walletAddress, accountInfo, networkStatus, disconnectWallet, refreshAccountInfo } = useAuth();
   const [logoutDialog, setLogoutDialog] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [activeAgentsCount, setActiveAgentsCount] = useState(0);
-  const [strategies, setStrategies] = useState([]);
 
-  // Fetch active strategies count
-  useEffect(() => {
-    const fetchActiveStrategies = async () => {
-      try {
-        const response = await fetch('http://127.0.0.1:8052/api/v1/strategies');
-        const data = await response.json();
-        
-        if (data.status === 'success' && data.strategies) {
-          setStrategies(data.strategies);
-          // Calculate total active investors across all strategies
-          const totalActiveInvestors = data.strategies.reduce((sum, strategy) => 
-            sum + (strategy.active_investors_count || 0), 0);
-          setActiveAgentsCount(totalActiveInvestors);
-        }
-      } catch (error) {
-        console.error('Failed to fetch active strategies:', error);
-        setActiveAgentsCount(0);
-      }
-    };
 
-    if (user && walletAddress) {
-      fetchActiveStrategies();
-      // Refresh every 30 seconds
-      const interval = setInterval(fetchActiveStrategies, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [user, walletAddress]);
 
   const handleLogout = async () => {
     try {
@@ -296,26 +266,6 @@ function Sidebar() {
 
         {/* Bottom Section */}
         <Box sx={{ mt: 'auto', p: 3 }}>
-          {/* Active Agents Stats */}
-          <Box
-            sx={{
-              p: 2,
-              mb: 2,
-              borderRadius: 2,
-              bgcolor: 'rgba(0, 229, 255, 0.05)',
-              border: '1px solid rgba(0, 229, 255, 0.2)',
-            }}
-          >
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Active Agents
-            </Typography>
-            <Typography variant="h4" color="primary.main" fontWeight={700}>
-              {activeAgentsCount}
-            </Typography>
-            <Typography variant="caption" color={activeAgentsCount > 0 ? "success.main" : "text.secondary"}>
-              {activeAgentsCount > 0 ? "↑ All systems operational" : "No active strategies"}
-            </Typography>
-          </Box>
 
           {/* Debug: Clear Wallet Session (Development Only) */}
           {process.env.NODE_ENV === 'development' && (

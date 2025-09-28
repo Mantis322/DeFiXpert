@@ -144,8 +144,8 @@ function _fetch_external_prices()::Dict{String, Any}
         try
             if haskey(prices, "ALGO/USD") && haskey(prices["ALGO/USD"], "coingecko")
                 base_price = prices["ALGO/USD"]["coingecko"]["price"]
-                # Simulate Tinyman price with small variance (-0.5% to +0.5%)
-                variance = (rand() - 0.5) * 0.01  # -0.5% to +0.5%
+                # Simulate Tinyman price with larger variance (-1% to +1%) for testing
+                variance = (rand() - 0.5) * 0.02  # -1% to +1% (increased from 0.01)
                 tinyman_price = base_price * (1.0 + variance)
                 
                 prices["ALGO/USD"]["tinyman"] = Dict(

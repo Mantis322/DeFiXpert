@@ -81,7 +81,7 @@ const StakePage = () => {
       const response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': walletAddress || '',
+          'Authorization': walletAddress ? `Wallet ${walletAddress}` : '',
           ...options.headers
         },
         ...options
@@ -562,6 +562,8 @@ const StakePage = () => {
                     <Typography variant="body2">
                       AI analyzed your investment and found {aiRecommendations.recommendations.length} suitable protocols 
                       with {aiRecommendations.overall_safety_score}% overall safety score.
+                      {aiRecommendations.arbitrage_opportunities_count && 
+                        ` Found ${aiRecommendations.arbitrage_opportunities_count} live arbitrage opportunities.`}
                     </Typography>
                   </Alert>
 
@@ -570,9 +572,25 @@ const StakePage = () => {
                       <Grid item xs={12} md={6} key={index}>
                         <Card variant="outlined" sx={{ height: '100%' }}>
                           <CardContent>
-                            <Typography variant="h6" gutterBottom>
-                              {rec.protocol_info.name}
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                              <Typography variant="h6" gutterBottom>
+                                {rec.protocol_info.name}
+                              </Typography>
+                              {rec.type === 'arbitrage' && (
+                                <Chip 
+                                  label="🔄 Arbitrage"
+                                  color="secondary"
+                                  size="small"
+                                />
+                              )}
+                              {rec.type === 'staking' && (
+                                <Chip 
+                                  label="💎 Staking"
+                                  color="primary"
+                                  size="small"
+                                />
+                              )}
+                            </Box>
                             
                             <Box sx={{ mb: 2 }}>
                               <Chip 
@@ -601,7 +619,20 @@ const StakePage = () => {
                             <Typography variant="body2" color="success.main" sx={{ mb: 1 }}>
                               Est. Monthly Return: {(rec.estimated_monthly_return / 1000000).toFixed(4)} ALGO
                             </Typography>
-                            <Typography variant="body2" color="text.secondary">
+                            
+                            {/* Special display for arbitrage opportunities */}
+                            {rec.type === 'arbitrage' && rec.arbitrage_details && (
+                              <Box sx={{ mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                                <Typography variant="caption" color="text.secondary">
+                                  Spread: {rec.arbitrage_details.spread_percentage.toFixed(2)}%
+                                </Typography>
+                                <Typography variant="caption" display="block" color="text.secondary">
+                                  {rec.arbitrage_details.buy_exchange} → {rec.arbitrage_details.sell_exchange}
+                                </Typography>
+                              </Box>
+                            )}
+                            
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                               {rec.reason}
                             </Typography>
                           </CardContent>

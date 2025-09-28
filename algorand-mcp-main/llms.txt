@@ -1,0 +1,144 @@
+# llms.txt - Optimized Documentation for AI Developer Tools
+
+project_name: algorand-mcp
+version: 2.7.6
+description: Model Context Protocol (MCP) server for Algorand blockchain interactions, providing tools and resources for account management, asset operations, application interactions, and transaction handling
+base_url: https://github.com/GoPlausible/algorand-mcp
+docs_url: https://github.com/GoPlausible/algorand-mcp/blob/main/packages/server/README.md
+
+# API Endpoints
+
+## Tools
+
+### Transaction Tools
+  - /tools/transaction/account
+    - make_payment_txn - Create payment transactions
+    - make_keyreg_txn - Create key registration transactions
+  
+  - /tools/transaction/asset
+    - make_asset_create_txn - Create new assets
+    - make_asset_config_txn - Modify asset configuration
+    - make_asset_destroy_txn - Remove assets
+    - make_asset_freeze_txn - Freeze/unfreeze assets
+    - make_asset_transfer_txn - Transfer assets between accounts
+  
+  - /tools/transaction/application
+    - make_app_create_txn - Deploy new applications
+    - make_app_update_txn - Update application code
+    - make_app_delete_txn - Remove applications
+    - make_app_optin_txn - Opt into applications
+    - make_app_closeout_txn - Close out from applications
+    - make_app_clear_txn - Clear application state
+    - make_app_call_txn - Call application methods
+  
+  - /tools/transaction/general
+    - assign_group_id - Assign group ID to transactions
+    - sign_transaction - Sign transactions
+    - sign_bytes - Sign arbitrary bytes
+    - encode_obj - Encode objects to msgpack
+    - decode_obj - Decode msgpack to objects
+
+### API Tools
+  - /tools/algod
+    - api_algod_get_account_info - Get account information
+    - api_algod_get_account_application_info - Get account's application info
+    - api_algod_get_account_asset_info - Get account's asset info
+    - api_algod_get_application_by_id - Get application information
+    - api_algod_get_application_box - Get application box
+    - api_algod_get_application_boxes - Get all application boxes
+    - api_algod_get_asset_by_id - Get asset information
+    - api_algod_get_pending_transaction - Get pending transaction
+    - api_algod_get_pending_transactions - Get all pending transactions
+    - api_algod_get_transaction_params - Get suggested parameters
+    - api_algod_get_node_status - Get node status
+  
+  - /tools/indexer
+    - api_indexer_lookup_account_by_id - Get account details
+    - api_indexer_lookup_account_assets - Get account assets
+    - api_indexer_lookup_account_created_applications - Get created apps
+    - api_indexer_lookup_applications - Get application info
+    - api_indexer_lookup_asset_by_id - Get asset details
+    - api_indexer_lookup_asset_balances - Get asset holders
+    - api_indexer_search_for_transactions - Search transactions
+    - api_indexer_lookup_transaction_by_id - Get transaction details
+
+### Utility Tools
+  - /tools/utility
+    - validate_address - Validate Algorand addresses
+    - encode_address - Encode public key to address
+    - decode_address - Decode address to public key
+    - get_application_address - Get app address from ID
+    - bytes_to_bigint - Convert bytes to BigInt
+    - bigint_to_bytes - Convert BigInt to bytes
+    - encode_uint64 - Encode uint64 to bytes
+    - decode_uint64 - Decode bytes to uint64
+
+### ARC-26 Tools
+  - /tools/arc26
+    - generate_algorand_uri - Generate Algorand URI
+    - generate_qr_code - Generate QR code for URI
+
+## Resources
+
+### Wallet Resources
+  - algorand://wallet/secretkey
+    - Secret key of the wallet in hex format
+  - algorand://wallet/publickey
+    - Public key of the wallet in hex format
+  - algorand://wallet/mnemonic
+    - Mnemonic phrase of the wallet
+  - algorand://wallet/address
+    - Algorand address of the wallet
+  - algorand://wallet/account
+    - Algorand account balance and asset holdings
+  - algorand://wallet/assets
+    - Asset holdings for Wallet account
+
+### Knowledge Resources
+  - algorand://knowledge/taxonomy
+    - Full knowledge taxonomy
+  - algorand://knowledge/taxonomy/arcs
+    - Algorand Request for Comments (ARCs)
+  - algorand://knowledge/taxonomy/sdks
+    - Software Development Kits documentation
+  - algorand://knowledge/taxonomy/algokit
+    - AlgoKit development tools and CLI
+  - algorand://knowledge/taxonomy/algokit-utils
+    - AlgoKit utility libraries
+  - algorand://knowledge/taxonomy/tealscript
+    - TEALScript smart contract language
+  - algorand://knowledge/taxonomy/puya
+    - Puya smart contract language
+  - algorand://knowledge/taxonomy/liquid-auth
+    - Liquid authentication system
+  - algorand://knowledge/taxonomy/python
+    - Python development resources
+  - algorand://knowledge/taxonomy/developers
+    - Comprehensive developer documentation
+  - algorand://knowledge/taxonomy/clis
+    - CLI tools documentation
+  - algorand://knowledge/taxonomy/nodes
+    - Node management documentation
+  - algorand://knowledge/taxonomy/details
+    - Detailed technical documentation
+
+# Authentication
+auth_method: Environment Variables
+auth_details: Requires Algorand node access credentials configured via environment variables
+
+# Rate Limits
+rate_limit: Determined by connected Algorand node
+rate_limit_upgrade_url: N/A - Self-hosted
+
+# SDKs
+sdks:
+  - language: JavaScript/TypeScript
+    sdk_url: https://www.npmjs.com/package/algosdk
+    version: 2.9.0
+  - language: TypeScript
+    sdk_url: https://www.npmjs.com/package/@modelcontextprotocol/sdk
+    version: 1.6.1
+
+# Support
+support_contact: GitHub Issues
+support_url: https://github.com/GoPlausible/algorand-mcp/issues

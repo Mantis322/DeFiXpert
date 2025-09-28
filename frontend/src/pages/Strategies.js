@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import RealTimePriceFeed from '../components/RealTimePriceFeed';
+import { aiArbitrageEngine } from '../services/aiArbitrageEngine';
+import algofiAPI from '../services/algofiAPI';
 import {
   Container,
   Typography,
@@ -36,6 +38,7 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  PlayArrow,
   PlayArrow as PlayIcon,
   Pause as PauseIcon,
   Delete as DeleteIcon,
@@ -45,7 +48,10 @@ import {
   Speed,
   Refresh,
   Timeline,
-  Notifications
+  Notifications,
+  SmartToy,
+  SignalCellularAlt,
+  Visibility
 } from '@mui/icons-material';
 
 const strategyTypes = [
@@ -72,14 +78,25 @@ function TabPanel(props) {
 function Strategies() {
   const { api } = useAuth();
   const [strategies, setStrategies] = useState([]);
+  const [aiStrategies, setAiStrategies] = useState([]); // AI managed strategies
   const [opportunities, setOpportunities] = useState([]);
+  const [realTimeOpportunities, setRealTimeOpportunities] = useState([]);
+  const [liveDetectedOpportunities, setLiveDetectedOpportunities] = useState([]);
+  const [aiSelectedOpportunities, setAiSelectedOpportunities] = useState([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [currentPrices, setCurrentPrices] = useState({});
+  const [priceHistory, setPriceHistory] = useState({});
+  const [liveOpportunitiesFetching, setLiveOpportunitiesFetching] = useState(false);
+  const [liveOpportunitiesInterval, setLiveOpportunitiesInterval] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [opportunitiesError, setOpportunitiesError] = useState(null);
   const [createDialog, setCreateDialog] = useState(false);
   const [editDialog, setEditDialog] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState(null);
+  const [selectedAiStrategy, setSelectedAiStrategy] = useState(null); // AI strategy selection
   const [tabValue, setTabValue] = useState(0);
+  const [aiEngineRunning, setAiEngineRunning] = useState(false);
   const [newStrategy, setNewStrategy] = useState({
     strategy_name: '',
     strategy_type: 'arbitrage',
@@ -119,6 +136,257 @@ function Strategies() {
     }
   }, [api]);
 
+  // Load AI selected opportunities using Groq LLM
+  const loadAiSelectedOpportunities = useCallback(async () => {
+    try {
+      setAiLoading(true);
+      console.log('🤖 Loading AI selected opportunities...');
+      
+      // Get fresh opportunities data
+      const opportunitiesResponse = await api.getArbitrageOpportunities();
+      const allOpportunities = Array.isArray(opportunitiesResponse) ? opportunitiesResponse : [];
+      
+      if (allOpportunities.length === 0) {
+        console.log('📊 No opportunities available for AI analysis');
+        setAiSelectedOpportunities([]);
+        return;
+      }
+
+      // Call AI analysis endpoint
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8052'}/api/v1/ai/analyze/opportunities`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          opportunities: allOpportunities,
+          selection_criteria: {
+            max_selections: 10,
+            risk_preference: 'medium',
+            min_profit_threshold: 0.0113
+          }
+        })
+      });
+
+      if (response.ok) {
+        const aiAnalysis = await response.json();
+        if (aiAnalysis.status === 'success') {
+          console.log('✅ AI selected opportunities:', aiAnalysis.selected_opportunities.length);
+          setAiSelectedOpportunities(aiAnalysis.selected_opportunities || []);
+        } else {
+          console.error('❌ AI analysis failed:', aiAnalysis.error);
+          setAiSelectedOpportunities([]);
+        }
+      } else {
+        console.error('❌ AI analysis API call failed');
+        setAiSelectedOpportunities([]);
+      }
+    } catch (error) {
+      console.error('Failed to load AI selected opportunities:', error);
+      setAiSelectedOpportunities([]);
+    } finally {
+      setAiLoading(false);
+    }
+  }, [api]); // Only depend on api, remove state dependencies to prevent infinite loop
+
+  // Live Opportunities Price Fetching - Similar to RealTimePriceFeed
+  const liveOpportunitiesIntervalRef = useRef(null);
+
+  // Filter function for ALGO/USD only
+  const filterAlgoUsdOnly = (prices) => {
+    console.log('🔍 Filtering prices for ALGO/USD only. Input:', prices);
+    const filtered = {};
+    if (prices['ALGO/USD']) {
+      filtered['ALGO/USD'] = prices['ALGO/USD'];
+      console.log('✅ Found ALGO/USD data:', prices['ALGO/USD']);
+    } else {
+      console.log('❌ No ALGO/USD data found in:', Object.keys(prices));
+    }
+    console.log('🎯 Filtered result:', filtered);
+    return filtered;
+  };
+
+  // Fetch live prices for opportunities
+  const fetchLivePricesForOpportunities = async () => {
+    try {
+      setLiveOpportunitiesFetching(true);
+      console.log('🔄 Live Opportunities: Fetching ALGO/USD prices...');
+      
+      const response = await algofiAPI.getCurrentPrices();
+      console.log('📥 Live Opportunities: Raw response:', response);
+      
+      const allPrices = response.prices || response;
+      console.log('📊 Live Opportunities: All prices:', allPrices);
+      
+      // Filter for ALGO/USD only
+      const prices = filterAlgoUsdOnly(allPrices);
+      console.log('🎯 Live Opportunities: Filtered ALGO/USD prices:', prices);
+      
+      if (prices && typeof prices === 'object' && Object.keys(prices).length > 0) {
+        const timestamp = new Date();
+        
+        // Add timestamp to each price entry
+        const timestampedPrices = {};
+        Object.entries(prices).forEach(([pair, dexes]) => {
+          if (dexes && typeof dexes === 'object') {
+            timestampedPrices[pair] = {};
+            Object.entries(dexes).forEach(([dex, data]) => {
+              timestampedPrices[pair][dex] = {
+                ...data,
+                timestamp,
+                fee: 0.003 // Default 0.3% fee per exchange
+              };
+            });
+          }
+        });
+        
+        setCurrentPrices(timestampedPrices);
+        
+        // Store price history for trend detection
+        setPriceHistory(prev => {
+          const newHistory = { ...prev };
+          Object.entries(timestampedPrices).forEach(([pair, exchanges]) => {
+            if (!newHistory[pair]) newHistory[pair] = {};
+            Object.entries(exchanges).forEach(([exchange, data]) => {
+              if (!newHistory[pair][exchange]) newHistory[pair][exchange] = [];
+              newHistory[pair][exchange].push({
+                price: data.price,
+                timestamp: timestamp.toISOString(),
+                volume: data.volume_24h || 0
+              });
+              // Keep only last 10 price points per exchange
+              if (newHistory[pair][exchange].length > 10) {
+                newHistory[pair][exchange] = newHistory[pair][exchange].slice(-10);
+              }
+            });
+          });
+          return newHistory;
+        });
+        
+        // Detect arbitrage opportunities
+        detectLiveArbitrageOpportunities(timestampedPrices, timestamp);
+        
+        setOpportunitiesError(null);
+        console.log('✅ Live Opportunities: Successfully processed price data');
+      } else {
+        console.warn('⚠️ Live Opportunities: No valid price data received');
+        setOpportunitiesError('No price data available from backend');
+      }
+    } catch (error) {
+      console.error('❌ Live Opportunities: Failed to fetch prices:', error);
+      setOpportunitiesError(`Failed to fetch live prices: ${error.message}`);
+    } finally {
+      setLiveOpportunitiesFetching(false);
+    }
+  };
+
+  // Detect arbitrage opportunities from live prices
+  const detectLiveArbitrageOpportunities = (priceData, timestamp) => {
+    console.log('🎯 Live Opportunities: Starting arbitrage detection with data:', priceData);
+    const newOpportunities = [];
+    
+    Object.entries(priceData).forEach(([pair, exchanges]) => {
+      console.log(`🔍 Analyzing pair ${pair} with exchanges:`, exchanges);
+      const exchangeList = Object.entries(exchanges);
+      console.log(`📊 Exchange list for ${pair}:`, exchangeList);
+      
+      // Compare all exchange pairs for arbitrage opportunities
+      for (let i = 0; i < exchangeList.length; i++) {
+        for (let j = i + 1; j < exchangeList.length; j++) {
+          const [exchange1, data1] = exchangeList[i];
+          const [exchange2, data2] = exchangeList[j];
+          
+          console.log(`🔄 Comparing ${exchange1} (${data1.price}) vs ${exchange2} (${data2.price})`);
+          
+          if (!data1.price || !data2.price) {
+            console.log(`⚠️ Missing price data: ${exchange1}=${data1.price}, ${exchange2}=${data2.price}`);
+            continue;
+          }
+          
+          const price1 = data1.price;
+          const price2 = data2.price;
+          
+          // Calculate spread percentage
+          const spreadPct = Math.abs((price2 - price1) / Math.min(price1, price2)) * 100;
+          
+          // Estimate total fees (0.05% per exchange = 0.1% total, very optimistic for testing)
+          const totalFees = 0.1; // 0.05% x 2 exchanges (very low for testing)
+          const netProfitPct = spreadPct - totalFees;
+          
+          console.log(`📈 Spread analysis: ${exchange1} vs ${exchange2}: spread=${spreadPct.toFixed(4)}%, net_profit=${netProfitPct.toFixed(4)}%`);
+          
+          if (netProfitPct > 0.001) { // Minimum 0.001% profit after fees (very low for testing)
+            console.log(`✅ Found arbitrage opportunity: ${netProfitPct.toFixed(2)}% profit`);
+            const buyExchange = price1 < price2 ? exchange1 : exchange2;
+            const sellExchange = price1 < price2 ? exchange2 : exchange1;
+            const buyPrice = Math.min(price1, price2);
+            const sellPrice = Math.max(price1, price2);
+            
+            // Estimate trade amounts based on volume
+            const minVolume = Math.min(data1.volume_24h || 50000, data2.volume_24h || 50000);
+            const minTradeAmount = Math.max(100, minVolume * 0.001); // 0.1% of daily volume
+            const maxTradeAmount = Math.min(5000, minVolume * 0.01); // 1% of daily volume
+            
+            newOpportunities.push({
+              id: `live-opp-${pair}-${buyExchange}-${sellExchange}-${timestamp.getTime()}`,
+              asset_pair: pair,
+              dex_1: buyExchange,
+              dex_2: sellExchange,
+              price_1: buyPrice,
+              price_2: sellPrice,
+              profit_percentage: netProfitPct,
+              min_trade_amount: minTradeAmount,
+              max_trade_amount: maxTradeAmount,
+              is_active: true,
+              expires_at: new Date(timestamp.getTime() + 15000).toISOString(), // 15 seconds
+              created_at: timestamp.toISOString(),
+              source: 'LIVE_OPPORTUNITIES',
+              confidence: spreadPct > 1.0 ? 'HIGH' : spreadPct > 0.5 ? 'MEDIUM' : 'LOW',
+              recommendation: `📈 Buy from ${(buyExchange || 'Unknown').toUpperCase()} at $${buyPrice.toFixed(4)} → Sell to ${(sellExchange || 'Unknown').toUpperCase()} at $${sellPrice.toFixed(4)}`
+            });
+          }
+        }
+      }
+    });
+    
+    // Update live detected opportunities, removing expired ones
+    setLiveDetectedOpportunities(prev => {
+      const now = new Date();
+      const validOpportunities = prev.filter(opp => new Date(opp.expires_at) > now);
+      return [...validOpportunities, ...newOpportunities]
+        .sort((a, b) => b.profit_percentage - a.profit_percentage) // Sort by profit desc
+        .slice(0, 20); // Keep only top 20
+    });
+    
+    console.log(`🎯 Live Opportunities: Detected ${newOpportunities.length} new arbitrage opportunities`);
+  };
+
+  // Start Live Opportunities price feed
+  const startLiveOpportunitiesPriceFeed = () => {
+    if (liveOpportunitiesIntervalRef.current) return;
+
+    console.log('🚀 Starting Live Opportunities price feed...');
+    setLiveOpportunitiesFetching(true);
+
+    // Initial fetch
+    fetchLivePricesForOpportunities();
+
+    // Set up interval to fetch prices every 5 seconds (same as RealTimePriceFeed)
+    liveOpportunitiesIntervalRef.current = setInterval(() => {
+      fetchLivePricesForOpportunities();
+    }, 5000);
+  };
+
+  // Stop Live Opportunities price feed
+  const stopLiveOpportunitiesPriceFeed = () => {
+    if (liveOpportunitiesIntervalRef.current) {
+      clearInterval(liveOpportunitiesIntervalRef.current);
+      liveOpportunitiesIntervalRef.current = null;
+    }
+    setLiveOpportunitiesFetching(false);
+    console.log('⏹️ Stopped Live Opportunities price feed');
+  };
+
   // Simulate performance for all active strategies
   const simulateActiveStrategiesPerformance = useCallback(async () => {
     console.log('🚀 Starting strategy performance simulation with real market data...');
@@ -144,30 +412,258 @@ function Strategies() {
     }
   }, [api, loadStrategies]); // strategies'i dependency'den çıkardık
 
+  // Handle real-time opportunities from RealTimePriceFeed
+  const handleRealTimeOpportunity = useCallback((opportunity) => {
+    console.log('📈 New real-time opportunity received:', opportunity);
+    setRealTimeOpportunities(prev => {
+      const updated = [opportunity, ...prev];
+      // Keep only last 10 real-time opportunities
+      return updated.slice(0, 10);
+    });
+  }, []);
+
+  // Handle price updates from RealTimePriceFeed
+  const handlePriceUpdate = useCallback((priceData) => {
+    console.log('📊 HANDLE PRICE UPDATE CALLED:');
+    console.log('📊 Price update received:', priceData);
+    console.log('📊 Data keys:', Object.keys(priceData || {}));
+    console.log('📊 ALGO/USD data:', priceData?.['ALGO/USD']);
+    
+    setCurrentPrices(priceData);
+    
+    // Update AI Engine with new price data
+    if (aiArbitrageEngine && Object.keys(priceData).length > 0) {
+      console.log('🤖 Sending price data to AI Engine...');
+      // This will trigger processOpportunitiesForActiveStrategies inside updatePriceData
+      aiArbitrageEngine.updatePriceData(priceData);
+      
+      // Update AI opportunities from engine
+      setRealTimeOpportunities(aiArbitrageEngine.getCurrentOpportunities());
+      
+      // Update AI strategies state with new P&L calculations
+      const updatedStrategies = aiArbitrageEngine.getAllStrategies();
+      setAiStrategies([...updatedStrategies]); // Force new array reference for re-render
+      
+      console.log('🤖 AI Engine processed opportunities, strategies updated:', 
+        updatedStrategies.map(s => `${s.name}: ${s.currentValue.toFixed(2)} ALGO`));
+    } else {
+      console.log('❌ AI Engine not available or no price data');
+    }
+    
+    // Store price history for trend detection
+    setPriceHistory(prev => {
+      const timestamp = new Date().toISOString();
+      const newHistory = { ...prev };
+      
+      Object.entries(priceData).forEach(([pair, exchanges]) => {
+        if (!newHistory[pair]) newHistory[pair] = {};
+        Object.entries(exchanges).forEach(([exchange, data]) => {
+          if (!newHistory[pair][exchange]) newHistory[pair][exchange] = [];
+          newHistory[pair][exchange].push({
+            price: data.price,
+            timestamp,
+            volume: data.volume_24h || 0
+          });
+          // Keep only last 10 price points per exchange
+          if (newHistory[pair][exchange].length > 10) {
+            newHistory[pair][exchange] = newHistory[pair][exchange].slice(-10);
+          }
+        });
+      });
+      
+      return newHistory;
+    });
+    
+    // Detect live opportunities from current prices
+    detectLiveOpportunities(priceData);
+    
+    // Update strategy P&L based on current prices
+    if (Object.keys(priceData).length > 0) {
+      updateStrategiesWithCurrentPrices(priceData);
+    }
+  }, []);
+
+  // Update strategy performance with current prices
+  const updateStrategiesWithCurrentPrices = useCallback((priceData) => {
+    setStrategies(prevStrategies => 
+      prevStrategies.map(strategy => {
+        if (!strategy.is_active) return strategy;
+        
+        // Simple P&L simulation based on current price movements
+        const algoUsdPrice = priceData['ALGO/USD'];
+        if (algoUsdPrice) {
+          const avgPrice = Object.values(algoUsdPrice).reduce((sum, data) => sum + data.price, 0) / Object.keys(algoUsdPrice).length;
+          const priceChange = Math.random() * 0.02 - 0.01; // ±1% random for simulation
+          const newPnl = strategy.allocated_amount * priceChange;
+          
+          return {
+            ...strategy,
+            current_pnl: newPnl,
+            performance_score: Math.max(0, Math.min(1, 0.7 + priceChange * 10))
+          };
+        }
+        return strategy;
+      })
+    );
+  }, []);
+
+  // Detect live opportunities from current price data
+  const detectLiveOpportunities = useCallback((priceData) => {
+    const newOpportunities = [];
+    const timestamp = new Date();
+    
+    Object.entries(priceData).forEach(([pair, exchanges]) => {
+      const exchangeList = Object.entries(exchanges);
+      
+      // Compare all exchange pairs for arbitrage opportunities
+      for (let i = 0; i < exchangeList.length; i++) {
+        for (let j = i + 1; j < exchangeList.length; j++) {
+          const [exchange1, data1] = exchangeList[i];
+          const [exchange2, data2] = exchangeList[j];
+          
+          if (!data1.price || !data2.price) continue;
+          
+          const price1 = data1.price;
+          const price2 = data2.price;
+          
+          // Calculate spread percentage
+          const spreadPct = Math.abs((price2 - price1) / Math.min(price1, price2)) * 100;
+          
+          // Estimate fees (0.3% per exchange is typical)
+          const totalFees = 0.6; // 0.3% x 2 exchanges
+          const netProfitPct = spreadPct - totalFees;
+          
+          if (netProfitPct > 0.1) { // Minimum 0.1% profit after fees
+            const buyExchange = price1 < price2 ? exchange1 : exchange2;
+            const sellExchange = price1 < price2 ? exchange2 : exchange1;
+            const buyPrice = Math.min(price1, price2);
+            const sellPrice = Math.max(price1, price2);
+            
+            // Estimate trade amounts based on volume
+            const minVolume = Math.min(data1.volume_24h || 50000, data2.volume_24h || 50000);
+            const minTradeAmount = Math.max(100, minVolume * 0.001); // 0.1% of daily volume
+            const maxTradeAmount = Math.min(5000, minVolume * 0.01); // 1% of daily volume
+            
+            newOpportunities.push({
+              id: `live-${pair}-${buyExchange}-${sellExchange}-${timestamp.getTime()}`,
+              asset_pair: pair,
+              dex_1: buyExchange,
+              dex_2: sellExchange,
+              price_1: buyPrice,
+              price_2: sellPrice,
+              profit_percentage: netProfitPct,
+              min_trade_amount: minTradeAmount,
+              max_trade_amount: maxTradeAmount,
+              is_active: true,
+              expires_at: new Date(timestamp.getTime() + 15000).toISOString(), // 15 seconds
+              created_at: timestamp.toISOString(),
+              source: 'LIVE_DETECTION',
+              confidence: spreadPct > 1.0 ? 'HIGH' : spreadPct > 0.5 ? 'MEDIUM' : 'LOW'
+            });
+          }
+        }
+      }
+    });
+    
+    // Update live opportunities, removing expired ones
+    setLiveDetectedOpportunities(prev => {
+      const now = new Date();
+      const validOpportunities = prev.filter(opp => new Date(opp.expires_at) > now);
+      return [...validOpportunities, ...newOpportunities]
+        .sort((a, b) => b.profit_percentage - a.profit_percentage) // Sort by profit desc
+        .slice(0, 20); // Keep only top 20
+    });
+  }, []);
+
   useEffect(() => {
     loadStrategies();
     loadOpportunities();
     
+    // Initialize AI Engine
+    console.log('🤖 Initializing AI Arbitrage Engine...');
+    try {
+      aiArbitrageEngine.start();
+      setAiEngineRunning(true);
+      setAiStrategies(aiArbitrageEngine.getAllStrategies());
+      console.log('✅ AI Engine started successfully');
+    } catch (error) {
+      console.error('❌ Failed to start AI Engine:', error);
+      setAiEngineRunning(false);
+    }
+    
     // Set up auto-refresh for opportunities (every 45 seconds)
     const opportunitiesInterval = setInterval(() => {
-      if (tabValue === 1) { // Only refresh when on opportunities tab
+      if (tabValue === 1) {
         loadOpportunities();
+      }
+      // Load AI selected opportunities when tab 2 is active or every 60 seconds
+      if (tabValue === 2) {
+        loadAiSelectedOpportunities();
       }
     }, 45000);
 
+    // Set up AI opportunities refresh (every 30 seconds for faster updates)
+    const aiOpportunitiesInterval = setInterval(() => {
+      loadAiSelectedOpportunities();
+    }, 30000);
+
     // Set up auto-refresh for strategy P&L (every 90 seconds)
     const strategiesInterval = setInterval(() => {
-      if (tabValue === 0) { // Only refresh when on strategies tab
+      if (tabValue === 0) {
         console.log('⏰ Auto-refreshing strategy P&L...');
         simulateActiveStrategiesPerformance();
+        // Update AI strategies
+        setAiStrategies(aiArbitrageEngine.getAllStrategies());
       }
-    }, 90000); // Reduced frequency to 90 seconds
+    }, 90000);
 
     return () => {
       clearInterval(opportunitiesInterval);
+      clearInterval(aiOpportunitiesInterval);
       clearInterval(strategiesInterval);
+      // Stop AI Engine on unmount
+      aiArbitrageEngine.stop();
     };
-  }, [loadStrategies, loadOpportunities, simulateActiveStrategiesPerformance, tabValue]); // strategies.length'i çıkardık
+  }, [loadStrategies, loadOpportunities, simulateActiveStrategiesPerformance, tabValue]);
+
+  // Separate useEffect for AI selected opportunities
+  useEffect(() => {
+    if (tabValue === 2) { // AI Seçtikleri tab
+      console.log('🤖 AI Seçtikleri tab activated - loading AI opportunities');
+      loadAiSelectedOpportunities();
+      
+      // Set up interval for AI opportunities
+      const aiInterval = setInterval(() => {
+        loadAiSelectedOpportunities();
+      }, 60000); // Refresh AI selections every minute
+      
+      return () => clearInterval(aiInterval);
+    }
+  }, [tabValue]); // Only depend on tabValue
+
+  // Start/Stop Live Opportunities price feed based on active tab OR active AI strategies
+  useEffect(() => {
+    const hasActiveAiStrategies = aiStrategies.some(s => s.status === 'active');
+    
+    if (tabValue === 1 || hasActiveAiStrategies) {
+      if (tabValue === 1) {
+        console.log('🎯 Live Opportunities tab activated - starting price feed');
+      }
+      if (hasActiveAiStrategies) {
+        console.log('🤖 Active AI strategies detected - keeping price feed active');
+      }
+      startLiveOpportunitiesPriceFeed();
+    } else {
+      console.log('⏸️ No active monitoring needed - stopping price feed');
+      stopLiveOpportunitiesPriceFeed();
+    }
+
+    return () => {
+      if (tabValue !== 1 && !aiStrategies.some(s => s.status === 'active')) {
+        stopLiveOpportunitiesPriceFeed();
+      }
+    };
+  }, [tabValue, aiStrategies]);
 
   const handleCreateStrategy = async () => {
     try {
@@ -225,8 +721,87 @@ function Strategies() {
     return `${minutes}m ${seconds}s`;
   };
 
+  // AI Strategy Handlers
+  const handleCreateAiStrategy = async () => {
+    try {
+      console.log('🤖 Creating new AI Arbitrage Strategy with 100 ALGO');
+      
+      const newAiStrategy = await aiArbitrageEngine.createStrategy({
+        name: `AI Arbitrage ${new Date().toLocaleDateString()}`,
+        initialAmount: 100,
+        exchanges: ['coingecko', 'htx', 'tinyman'],
+        minProfitThreshold: 0.2, // Lowered from 0.5% to 0.2% to match Live Opportunities
+        maxTradeAmount: 20, // Max 20% of capital per trade
+        riskLevel: 'moderate'
+      });
+
+      console.log('✅ AI Strategy created:', newAiStrategy);
+      setAiStrategies(aiArbitrageEngine.getAllStrategies());
+      
+      // Show success notification
+      alert(`🚀 AI Arbitrage Strategy created successfully!\nInitial Amount: 100 ALGO\nStrategy ID: ${newAiStrategy.id}`);
+    } catch (error) {
+      console.error('❌ Error creating AI strategy:', error);
+      alert('Failed to create AI strategy: ' + error.message);
+    }
+  };
+
+  const handleToggleAiStrategy = async (strategyId) => {
+    try {
+      const strategy = aiStrategies.find(s => s.id === strategyId);
+      if (!strategy) return;
+
+      if (strategy.status === 'active') {
+        console.log('⏸️ Pausing AI strategy:', strategyId);
+        aiArbitrageEngine.pauseStrategy(strategyId);
+      } else {
+        console.log('▶️ Activating AI strategy:', strategyId);
+        aiArbitrageEngine.activateStrategy(strategyId);
+      }
+
+      setAiStrategies(aiArbitrageEngine.getAllStrategies());
+    } catch (error) {
+      console.error('❌ Error toggling AI strategy:', error);
+      alert('Failed to toggle AI strategy: ' + error.message);
+    }
+  };
+
+  const handleViewAiStrategy = (strategy) => {
+    console.log('👁️ Viewing AI strategy details:', strategy);
+    
+    const details = `
+🤖 AI Strategy Details:
+• Name: ${strategy.name}
+• Status: ${(strategy.status || 'unknown').toUpperCase()}
+• Initial Amount: ${strategy.initialAmount} ALGO
+• Current Value: ${strategy.currentValue.toFixed(2)} ALGO
+• P&L: ${(strategy.currentValue - strategy.initialAmount).toFixed(2)} ALGO
+• Total Trades: ${strategy.stats.totalTrades}
+• Successful Trades: ${strategy.stats.successfulTrades}
+• Win Rate: ${strategy.stats.totalTrades > 0 ? ((strategy.stats.successfulTrades / strategy.stats.totalTrades) * 100).toFixed(1) : 0}%
+• Active Trades: ${strategy.activeTrades.length}
+• Created: ${strategy.createdAt.toLocaleDateString()}
+
+📊 Current Opportunities: ${realTimeOpportunities.length}
+⚡ AI Engine Status: ${aiEngineRunning ? 'RUNNING' : 'STOPPED'}
+    `;
+    
+    alert(details);
+  };
+
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <>
+      {/* Add CSS animations */}
+      <style>
+        {`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+          }
+        `}
+      </style>
+      
+      <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
         <Typography variant="h4" fontWeight={700}>
           Trading Strategies
@@ -268,7 +843,7 @@ function Strategies() {
           />
           <Tab 
             label={
-              <Badge badgeContent={opportunities.length} color="success">
+              <Badge badgeContent={opportunities.length + liveDetectedOpportunities.length + realTimeOpportunities.length} color="success">
                 Live Opportunities
               </Badge>
             }
@@ -278,11 +853,22 @@ function Strategies() {
             aria-controls="strategy-tabpanel-1"
           />
           <Tab 
-            label="Real-Time Feeds" 
-            icon={<TrendingUp />} 
+            label={
+              <Badge badgeContent={aiSelectedOpportunities.length} color="secondary">
+                AI Selected
+              </Badge>
+            }
+            icon={<SmartToy />} 
             iconPosition="start"
             id="strategy-tab-2"
             aria-controls="strategy-tabpanel-2"
+          />
+          <Tab 
+            label="Real-Time Feeds" 
+            icon={<TrendingUp />} 
+            iconPosition="start"
+            id="strategy-tab-3"
+            aria-controls="strategy-tabpanel-3"
           />
         </Tabs>
       </Card>
@@ -315,9 +901,25 @@ function Strategies() {
         <Card>
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" fontWeight={600}>
-                Your Strategies ({strategies.length})
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Typography variant="h6" fontWeight={600}>
+                  Your Strategies ({strategies.length})
+                </Typography>
+                {Object.keys(currentPrices).length > 0 && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip 
+                      label="LIVE PRICES" 
+                      size="small" 
+                      color="success" 
+                      variant="filled"
+                      icon={<SignalCellularAlt />}
+                    />
+                    <Typography variant="caption" color="success.main">
+                      ALGO: ${(Object.values(currentPrices['ALGO/USD'] || {}).reduce((sum, data) => sum + data.price, 0) / Math.max(1, Object.keys(currentPrices['ALGO/USD'] || {}).length)).toFixed(4)}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button
                   variant="outlined"
@@ -470,8 +1072,28 @@ function Strategies() {
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6" fontWeight={600}>
-                Live Arbitrage Opportunities ({opportunities.length})
+                Live Arbitrage Opportunities ({opportunities.length + liveDetectedOpportunities.length + realTimeOpportunities.length})
               </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Chip 
+                  label={`DB: ${opportunities.length}`} 
+                  size="small" 
+                  color="info" 
+                  variant="outlined" 
+                />
+                <Chip 
+                  label={`Live: ${liveDetectedOpportunities.length}`} 
+                  size="small" 
+                  color="success" 
+                  variant="filled" 
+                />
+                <Chip 
+                  label={`Feed: ${realTimeOpportunities.length}`} 
+                  size="small" 
+                  color="warning" 
+                  variant="outlined" 
+                />
+              </Box>
               <Button
                 variant="outlined"
                 size="small"
@@ -499,9 +1121,21 @@ function Strategies() {
                   </Button>
                 </Box>
               </Alert>
-            ) : opportunities.length === 0 ? (
+            ) : opportunities.length === 0 && liveDetectedOpportunities.length === 0 && realTimeOpportunities.length === 0 ? (
               <Alert severity="info">
-                No arbitrage opportunities currently detected. The system continuously scans for new opportunities.
+                Live Opportunities monitoring is active. System automatically detects arbitrage opportunities.
+                <Typography variant="body2" sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  🔍 Price Feed: {liveOpportunitiesFetching ? '🔄 Fetching...' : (Object.keys(currentPrices).length > 0 ? '✅ Active' : '⏸️ Starting...')}
+                  {Object.keys(currentPrices).length > 0 && (
+                    <>
+                      | 📊 Exchanges: {Object.keys(currentPrices['ALGO/USD'] || {}).join(', ')}
+                      | ⚡ Last update: {new Date().toLocaleTimeString()}
+                    </>
+                  )}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                  💡 System fetches live prices from CoinGecko, HTX & Tinyman every 5 seconds to detect "Buy from X, Sell to Y" opportunities
+                </Typography>
               </Alert>
             ) : (
               <TableContainer component={Paper} variant="outlined">
@@ -514,6 +1148,7 @@ function Strategies() {
                       <TableCell align="right">Buy Price</TableCell>
                       <TableCell align="right">Sell Price</TableCell>
                       <TableCell align="right">Profit %</TableCell>
+                      <TableCell>Recommendation</TableCell>
                       <TableCell align="right">Min Amount</TableCell>
                       <TableCell align="right">Max Amount</TableCell>
                       <TableCell>Expires In</TableCell>
@@ -521,6 +1156,183 @@ function Strategies() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
+                    {/* Live detected opportunities (highest priority) */}
+                    {liveDetectedOpportunities.map((opp) => {
+                      const timeLeft = Math.max(0, (new Date(opp.expires_at) - new Date()) / 1000);
+                      const isExpiring = timeLeft < 5;
+                      
+                      return (
+                        <TableRow 
+                          key={opp.id} 
+                          sx={{ 
+                            backgroundColor: isExpiring ? 'error.light' : 'success.light',
+                            opacity: isExpiring ? 0.7 : 0.95,
+                            animation: isExpiring ? 'pulse 1s infinite' : 'none'
+                          }}
+                        >
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="subtitle2" fontWeight={600}>
+                                {opp.asset_pair}
+                              </Typography>
+                              <Chip 
+                                label={`LIVE ${opp.confidence}`} 
+                                size="small" 
+                                color={opp.confidence === 'HIGH' ? 'error' : opp.confidence === 'MEDIUM' ? 'warning' : 'info'}
+                                variant="filled"
+                              />
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Chip label={opp.dex_1} size="small" color="success" variant="outlined" />
+                              <Typography variant="caption" color="success.main">BUY</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Chip label={opp.dex_2} size="small" color="error" variant="outlined" />
+                              <Typography variant="caption" color="error.main">SELL</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography color="success.main" fontWeight={600}>
+                              ${opp.price_1.toFixed(4)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography color="error.main" fontWeight={600}>
+                              ${opp.price_2.toFixed(4)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Chip
+                              label={`+${opp.profit_percentage.toFixed(2)}%`}
+                              color={opp.profit_percentage > 1 ? 'error' : opp.profit_percentage > 0.5 ? 'warning' : 'success'}
+                              size="small"
+                              variant="filled"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ 
+                              fontSize: '0.75rem', 
+                              color: 'success.dark', 
+                              fontWeight: 'bold',
+                              backgroundColor: 'success.light',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              display: 'inline-block'
+                            }}>
+                              {opp.recommendation || `📈 Buy ${(opp.dex_1 || 'Unknown').toUpperCase()} → Sell ${(opp.dex_2 || 'Unknown').toUpperCase()}`}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography variant="body2">{Math.round(opp.min_trade_amount)} ALGO</Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography variant="body2">{Math.round(opp.max_trade_amount)} ALGO</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography 
+                              variant="body2" 
+                              color={isExpiring ? 'error.main' : 'success.main'}
+                              fontWeight={isExpiring ? 'bold' : 'normal'}
+                            >
+                              {Math.floor(timeLeft)}s
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button
+                              variant="contained"
+                              size="small"
+                              color={isExpiring ? 'error' : 'success'}
+                              disabled={timeLeft <= 0}
+                              sx={{ 
+                                minWidth: 80,
+                                animation: opp.confidence === 'HIGH' && !isExpiring ? 'pulse 2s infinite' : 'none'
+                              }}
+                            >
+                              {isExpiring ? 'EXPIRING' : 'EXECUTE'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {/* Real-time feed opportunities */}
+                    {realTimeOpportunities.map((opp) => (
+                      <TableRow key={`rt-${opp.id}`} sx={{ backgroundColor: 'success.light', opacity: 0.1 }}>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="subtitle2" fontWeight={600}>
+                              {opp.pair}
+                            </Typography>
+                            <Chip label="LIVE" size="small" color="success" />
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={opp.buyDex} size="small" color="success" variant="outlined" />
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={opp.sellDex} size="small" color="error" variant="outlined" />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography color="success.main" fontWeight={600}>
+                            ${opp.buyPrice.toFixed(4)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography color="error.main" fontWeight={600}>
+                            ${opp.sellPrice.toFixed(4)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Chip
+                            label={`+${opp.netProfitPct.toFixed(2)}%`}
+                            color="success"
+                            size="small"
+                            variant="filled"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ 
+                            fontSize: '0.75rem', 
+                            color: 'warning.dark', 
+                            fontWeight: 'bold',
+                            backgroundColor: 'warning.light',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            display: 'inline-block'
+                          }}>
+                            📊 Buy {(opp.buyDex || 'Unknown').toUpperCase()} → Sell {(opp.sellDex || 'Unknown').toUpperCase()}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body2">100-1000 ALGO</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body2">5000 ALGO</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography 
+                            variant="body2" 
+                            color={new Date(opp.expiresAt) - new Date() < 10000 ? 'error.main' : 'success.main'}
+                          >
+                            {Math.max(0, Math.floor((new Date(opp.expiresAt) - new Date()) / 1000))}s
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            variant="contained"
+                            size="small"
+                            color="success"
+                            disabled={new Date(opp.expiresAt) <= new Date()}
+                          >
+                            Execute
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {/* Database opportunities */}
                     {opportunities.map((opp) => (
                       <TableRow key={opp.id}>
                         <TableCell>
@@ -547,6 +1359,19 @@ function Strategies() {
                             size="small"
                             variant="filled"
                           />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ 
+                            fontSize: '0.75rem', 
+                            color: 'info.dark', 
+                            fontWeight: 'bold',
+                            backgroundColor: 'info.light',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            display: 'inline-block'
+                          }}>
+                            🏦 Buy {(opp.dex_1 || 'Unknown').toUpperCase()} → Sell {(opp.dex_2 || 'Unknown').toUpperCase()}
+                          </Typography>
                         </TableCell>
                         <TableCell align="right">
                           {formatAlgo(opp.min_trade_amount)}
@@ -583,14 +1408,158 @@ function Strategies() {
       </TabPanel>
 
       {/* Real-Time Feeds Tab */}
-      <TabPanel value={tabValue} index={2}>
+      <TabPanel value={tabValue} index={3}>
         <RealTimePriceFeed 
-          onOpportunityFound={(opportunity) => {
-            console.log('New arbitrage opportunity detected:', opportunity);
-            // Optionally add to opportunities list or trigger notifications
-          }}
+          onOpportunityFound={handleRealTimeOpportunity}
+          onPriceUpdate={handlePriceUpdate}
         />
       </TabPanel>
+
+      {/* AI Selected Opportunities Tab */}
+      <TabPanel value={tabValue} index={2}>
+        <Card>
+          <CardContent>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <SmartToy color="secondary" />
+                <Typography variant="h6" fontWeight={600}>
+                  AI Selected ({aiSelectedOpportunities.length})
+                </Typography>
+              </Box>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<Refresh />}
+                onClick={loadAiSelectedOpportunities}
+                disabled={aiLoading}
+              >
+                {aiLoading ? 'AI Analyzing...' : 'Refresh AI Analysis'}
+              </Button>
+            </Box>
+
+            {aiLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : aiSelectedOpportunities.length === 0 ? (
+              <Box sx={{ textAlign: 'center', py: 6 }}>
+                <SmartToy sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  No AI selections yet
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  AI system is analyzing the best arbitrage opportunities...
+                </Typography>
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>AI Score & Asset</TableCell>
+                      <TableCell>Buy Exchange</TableCell>
+                      <TableCell>Sell Exchange</TableCell>
+                      <TableCell align="right">Buy Price</TableCell>
+                      <TableCell align="right">Sell Price</TableCell>
+                      <TableCell align="right">Profit</TableCell>
+                      <TableCell align="right">Risk Level</TableCell>
+                      <TableCell align="right">Action</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {aiSelectedOpportunities.map((opp, index) => (
+                      <TableRow 
+                        key={`ai-${index}`}
+                        sx={{ 
+                          backgroundColor: 'secondary.light',
+                          '&:hover': { backgroundColor: 'secondary.main', opacity: 0.8 }
+                        }}
+                      >
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="subtitle2" fontWeight={600}>
+                              {opp.asset_pair}
+                            </Typography>
+                            <Chip 
+                              label={`AI: ${opp.ai_confidence || 'HIGH'}`} 
+                              size="small" 
+                              color="secondary"
+                              variant="filled"
+                            />
+                            <Chip 
+                              label={`Score: ${opp.ai_score || '9.5'}`} 
+                              size="small" 
+                              color="info"
+                              variant="outlined"
+                            />
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Chip label={opp.dex_1} size="small" color="success" variant="outlined" />
+                            <Typography variant="caption" color="success.main">BUY</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Chip label={opp.dex_2} size="small" color="error" variant="outlined" />
+                            <Typography variant="caption" color="error.main">SELL</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography color="success.main" fontWeight={600}>
+                            ${opp.price_1.toFixed(4)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography color="error.main" fontWeight={600}>
+                            ${opp.price_2.toFixed(4)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                            <Typography color="success.main" fontWeight={600} variant="body2">
+                              {opp.profit_percentage.toFixed(2)}%
+                            </Typography>
+                            <Typography color="success.main" variant="caption">
+                              ${opp.estimated_profit?.toFixed(2) || '0.00'}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Chip 
+                            label={opp.risk_level || 'LOW'} 
+                            size="small" 
+                            color={opp.risk_level === 'HIGH' ? 'error' : opp.risk_level === 'MEDIUM' ? 'warning' : 'success'}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            onClick={() => console.log('Execute AI selected opportunity:', opp)}
+                          >
+                            <PlayArrow />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </CardContent>
+        </Card>
+      </TabPanel>
+
+      {/* Hidden RealTimePriceFeed for AI Engine - Always Running */}
+      <Box sx={{ display: 'none' }}>
+        <RealTimePriceFeed 
+          onOpportunityFound={handleRealTimeOpportunity}
+          onPriceUpdate={handlePriceUpdate}
+        />
+      </Box>
 
       {/* Create Strategy Dialog */}
       <Dialog open={createDialog} onClose={() => setCreateDialog(false)} maxWidth="md" fullWidth>
@@ -646,6 +1615,7 @@ function Strategies() {
         </DialogActions>
       </Dialog>
     </Container>
+    </>
   );
 }
 

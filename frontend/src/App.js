@@ -9,7 +9,6 @@ import Sidebar from './components/Sidebar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SwarmControl from './pages/SwarmControl';
-import MarketAnalysis from './pages/MarketAnalysis';
 import PerformanceAnalytics from './pages/PerformanceAnalytics';
 import About from './pages/About';
 import Strategies from './pages/Strategies';
@@ -121,7 +120,6 @@ function AppLayout() {
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/swarm" element={<SwarmControl />} />
-                  <Route path="/market" element={<MarketAnalysis />} />
                   <Route path="/strategies" element={<Strategies />} />
                   <Route path="/performance" element={<PerformanceAnalytics />} />
                   <Route path="/stake" element={<StakePage />} />

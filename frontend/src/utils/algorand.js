@@ -10,17 +10,17 @@ export const peraWallet = new PeraWalletConnect({
   }
 });
 
-// Algorand client configuration for TestNet
+// Algorand client configuration for MainNet
 export const algodClient = new algosdk.Algodv2(
   '',
-  'https://testnet-api.algonode.cloud',
+  'https://mainnet-api.algonode.cloud',
   ''
 );
 
-// Indexer client for TestNet
+// Indexer client for MainNet
 export const indexerClient = new algosdk.Indexer(
   '',
-  'https://testnet-idx.algonode.cloud',
+  'https://mainnet-idx.algonode.cloud',
   ''
 );
 
@@ -180,6 +180,27 @@ export const waitForConfirmation = async (txId) => {
     return confirmedTxn;
   } catch (error) {
     console.error('Transaction confirmation error:', error);
+    throw error;
+  }
+};
+
+// Get network status and confirm we're on mainnet
+export const getNetworkStatus = async () => {
+  try {
+    const nodeStatus = await algodClient.status().do();
+    const genesis = await algodClient.genesis().do();
+    
+    return {
+      network: genesis.network,
+      lastRound: nodeStatus['last-round'],
+      timeSinceLastRound: nodeStatus['time-since-last-round'],
+      catchupTime: nodeStatus['catchup-time'],
+      isMainnet: genesis.network === 'mainnet-v1.0',
+      genesisId: genesis.id,
+      genesisHash: genesis['genesis-hash-b64']
+    };
+  } catch (error) {
+    console.error('Network status error:', error);
     throw error;
   }
 };

@@ -28,7 +28,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import algofiAPI from '../services/algofiAPI';
 
-const RealTimePriceFeed = ({ onOpportunityFound }) => {
+const RealTimePriceFeed = ({ onOpportunityFound, onPriceUpdate }) => {
   const [priceData, setPriceData] = useState({});
   const [streamingStatus, setStreamingStatus] = useState({
     active: false,
@@ -84,6 +84,11 @@ const RealTimePriceFeed = ({ onOpportunityFound }) => {
         setPriceData(timestampedPrices);
         updateChartData(timestampedPrices, timestamp);
         detectArbitrageOpportunities(timestampedPrices, timestamp);
+        
+        // Notify parent component about price updates
+        if (onPriceUpdate) {
+          onPriceUpdate(timestampedPrices);
+        }
         
         setStreamingStatus(prev => ({
           ...prev,
@@ -404,8 +409,8 @@ const RealTimePriceFeed = ({ onOpportunityFound }) => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>ALGO/USD Price Chart</Typography>
-              <Box sx={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <Box sx={{ height: 300, minHeight: 300, width: '100%', minWidth: 400 }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={400} minHeight={300}>
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="timestamp" />

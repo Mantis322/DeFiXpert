@@ -6,7 +6,8 @@ import {
   isWalletConnected,
   getConnectedAccounts,
   clearWalletSession,
-  peraWallet
+  peraWallet,
+  getNetworkStatus
 } from '../utils/algorand';
 import algofiAPI from '../services/algofiAPI';
 
@@ -24,6 +25,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [walletAddress, setWalletAddress] = useState(null);
   const [accountInfo, setAccountInfo] = useState(null);
+  const [networkStatus, setNetworkStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -84,6 +86,22 @@ export const AuthProvider = ({ children }) => {
       const info = await getAccountInfo(address);
       setAccountInfo(info);
       setWalletAddress(address);
+
+      // Check network status
+      try {
+        const networkInfo = await getNetworkStatus();
+        setNetworkStatus(networkInfo);
+        
+        if (!networkInfo.isMainnet) {
+          console.warn('⚠️ Warning: Not connected to Algorand MainNet!', networkInfo);
+          setError(`Warning: Connected to ${networkInfo.network} instead of MainNet`);
+        } else {
+          console.log('✅ Connected to Algorand MainNet', networkInfo);
+        }
+      } catch (networkError) {
+        console.error('Network status check failed:', networkError);
+        setError('Unable to verify network connection');
+      }
 
       // Set wallet address in API client
       algofiAPI.setWalletAddress(address);
@@ -197,6 +215,7 @@ export const AuthProvider = ({ children }) => {
     user,
     walletAddress,
     accountInfo,
+    networkStatus,
     loading,
     error,
     connectWallet: connectUserWallet,
