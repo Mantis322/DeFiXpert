@@ -32,7 +32,6 @@ mindmap
 			Oracle
 		Arbitrage Engine
 			Opportunity Detection
-			Cross-chain
 		AI Strategy
 			Simulation
 			Auto-Stake
